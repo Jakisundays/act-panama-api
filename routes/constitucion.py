@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, Request, HTTPException, Query
+from fastapi import APIRouter, Request, HTTPException, Query
 from fastapi.responses import JSONResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from pydantic import BaseModel, Field
+ 
+from pydantic import BaseModel
 from typing import Optional, Dict, Any, List, Tuple
 from pathlib import Path
 from functools import lru_cache
@@ -11,14 +11,13 @@ import re
 
 router = APIRouter()
 
-security_optional = HTTPBasic(auto_error=False)
+ 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_JSON_PATH = BASE_DIR / "constitucion_panama.json"
 CONSTITUCION_PATH = Path(os.getenv("CONSTITUCION_FILE", str(DEFAULT_JSON_PATH)))
 
-def optional_auth(credentials: Optional[HTTPBasicCredentials] = Depends(security_optional)) -> Optional[HTTPBasicCredentials]:
-    return credentials
+ 
 
 class Articulo(BaseModel):
     numero: int
@@ -27,7 +26,6 @@ class Articulo(BaseModel):
     capitulo_num: Optional[int] = None
     capitulo_nombre: Optional[str] = None
     texto: str
-    anios: List[int] = Field(default_factory=list)
 
 class Capitulo(BaseModel):
     titulo_num: int
@@ -75,9 +73,7 @@ def extraer_articulo_num(k: str) -> Optional[int]:
     m = re.search(r"articulo-(\d+)", k)
     return int(m.group(1)) if m else None
 
-def extraer_anios(texto: str) -> List[int]:
-    anios = re.findall(r"\b(1\d{3}|20\d{2}|21\d{2})\b", texto)
-    return sorted({int(a) for a in anios})
+ 
 
 @lru_cache(maxsize=8)
 def cargar_json(mtime: float) -> Dict[str, Any]:
@@ -104,7 +100,7 @@ def construir_indices(mtime: float) -> Dict[str, Any]:
                     anum = extraer_articulo_num(k)
                     if anum is None:
                         continue
-                    art = Articulo(numero=anum, titulo_num=tnum, titulo_nombre=nombre_titulo, capitulo_num=cnum, capitulo_nombre=nombre_capitulo, texto=v, anios=extraer_anios(v))
+                    art = Articulo(numero=anum, titulo_num=tnum, titulo_nombre=nombre_titulo, capitulo_num=cnum, capitulo_nombre=nombre_capitulo, texto=v)
                     articulos[anum] = art
                     lista_art.append(art)
                     tinfo["articulos"].append(art)
@@ -116,7 +112,7 @@ def construir_indices(mtime: float) -> Dict[str, Any]:
                 anum = extraer_articulo_num(k)
                 if anum is None:
                     continue
-                art = Articulo(numero=anum, titulo_num=tnum, titulo_nombre=nombre_titulo, texto=v, anios=extraer_anios(v))
+                art = Articulo(numero=anum, titulo_num=tnum, titulo_nombre=nombre_titulo, texto=v)
                 articulos[anum] = art
                 tinfo["articulos"].append(art)
         titulos[nombre_titulo] = tinfo
@@ -141,7 +137,7 @@ def paginar(lista: List[Any], pagina: int, tamano: int) -> Tuple[List[Any], int]
     fin = inicio + tamano
     return lista[inicio:fin], total
 
-def filtrar_buscar(items: List[Any], q: Optional[str], anio_desde: Optional[int], anio_hasta: Optional[int], tipo: str) -> List[Any]:
+def filtrar_buscar(items: List[Any], q: Optional[str], tipo: str) -> List[Any]:
     res = items
     if q:
         ql = q.lower()
@@ -151,15 +147,6 @@ def filtrar_buscar(items: List[Any], q: Optional[str], anio_desde: Optional[int]
             res = [i for i in res if ql in i.nombre.lower() or ql in i.titulo_nombre.lower()]
         elif tipo == "titulo":
             res = [i for i in res if ql in i["nombre"].lower()]
-    if anio_desde is not None or anio_hasta is not None:
-        fd = anio_desde if anio_desde is not None else -10**9
-        fh = anio_hasta if anio_hasta is not None else 10**9
-        if tipo == "articulo":
-            res = [i for i in res if any(fd <= y <= fh for y in i.anios)]
-        elif tipo == "capitulo":
-            res = [i for i in res if any(fd <= y <= fh for a in i.articulos for y in a.anios)]
-        elif tipo == "titulo":
-            res = [i for i in res if any(fd <= y <= fh for a in i["articulos"] for y in a.anios)]
     return res
 
 def ordenar(items: List[Any], ordenar_por: Optional[str], orden: str, tipo: str) -> List[Any]:
@@ -170,7 +157,6 @@ def ordenar(items: List[Any], ordenar_por: Optional[str], orden: str, tipo: str)
             "longitud": lambda a: len(a.texto),
             "titulo": lambda a: a.titulo_num,
             "capitulo": lambda a: a.capitulo_num or 0,
-            "anio": lambda a: max(a.anios) if a.anios else -1,
         }
     elif tipo == "capitulo":
         keymap = {
@@ -198,7 +184,7 @@ def ordenar(items: List[Any], ordenar_por: Optional[str], orden: str, tipo: str)
         401: {"description": "Autenticación requerida si se configura como obligatoria"},
     },
 )
-async def obtener_constitucion(request: Request, user: Optional[HTTPBasicCredentials] = Depends(optional_auth)):
+async def obtener_constitucion(request: Request):
     m = get_mtime()
     data = cargar_json(m)
     return JSONResponse(content=data)
@@ -208,13 +194,13 @@ async def obtener_constitucion(request: Request, user: Optional[HTTPBasicCredent
     response_model=Paginacion,
     summary="Listar títulos",
     tags=["Títulos"],
-    description="Lista los Títulos con soporte de búsqueda, filtros por años, orden y paginación.",
+    description="Lista los Títulos con soporte de búsqueda, orden y paginación.",
 )
-async def listar_titulos(q: Optional[str] = Query(None), anio_desde: Optional[int] = Query(None), anio_hasta: Optional[int] = Query(None), ordenar_por: Optional[str] = Query("numero"), orden: str = Query("asc"), pagina: int = Query(1, ge=1), tamano_pagina: int = Query(20, ge=1, le=200), user: Optional[HTTPBasicCredentials] = Depends(optional_auth)):
+async def listar_titulos(q: Optional[str] = Query(None), ordenar_por: Optional[str] = Query("numero"), orden: str = Query("asc"), pagina: int = Query(1, ge=1), tamano_pagina: int = Query(20, ge=1, le=200)):
     m = get_mtime()
     idx = construir_indices(m)
     lista = list(idx["titulos"].values())
-    lista = filtrar_buscar(lista, q, anio_desde, anio_hasta, "titulo")
+    lista = filtrar_buscar(lista, q, "titulo")
     lista = ordenar(lista, ordenar_por, orden, "titulo")
     page_items, total = paginar(lista, pagina, tamano_pagina)
     return Paginacion(total=total, pagina=pagina, tamano_pagina=tamano_pagina, items=page_items)
@@ -227,7 +213,7 @@ async def listar_titulos(q: Optional[str] = Query(None), anio_desde: Optional[in
     description="Obtiene un Título por su número (arábigo o romano).",
     responses={404: {"description": "Título no encontrado"}},
 )
-async def obtener_titulo(titulo_id: str, user: Optional[HTTPBasicCredentials] = Depends(optional_auth)):
+async def obtener_titulo(titulo_id: str):
     m = get_mtime()
     idx = construir_indices(m)
     try:
@@ -247,7 +233,7 @@ async def obtener_titulo(titulo_id: str, user: Optional[HTTPBasicCredentials] = 
     tags=["Capítulos"],
     description="Lista los capítulos del Título indicado con búsqueda, orden y paginación.",
 )
-async def listar_capitulos_por_titulo(titulo_id: str, q: Optional[str] = Query(None), ordenar_por: Optional[str] = Query("numero"), orden: str = Query("asc"), pagina: int = Query(1, ge=1), tamano_pagina: int = Query(20, ge=1, le=200), user: Optional[HTTPBasicCredentials] = Depends(optional_auth)):
+async def listar_capitulos_por_titulo(titulo_id: str, q: Optional[str] = Query(None), ordenar_por: Optional[str] = Query("numero"), orden: str = Query("asc"), pagina: int = Query(1, ge=1), tamano_pagina: int = Query(20, ge=1, le=200)):
     m = get_mtime()
     idx = construir_indices(m)
     try:
@@ -259,7 +245,7 @@ async def listar_capitulos_por_titulo(titulo_id: str, q: Optional[str] = Query(N
     if not t:
         raise HTTPException(status_code=404, detail="Título no encontrado")
     lista = t["capitulos"] or []
-    lista = filtrar_buscar(lista, q, None, None, "capitulo")
+    lista = filtrar_buscar(lista, q, "capitulo")
     lista = ordenar(lista, ordenar_por, orden, "capitulo")
     page_items, total = paginar(lista, pagina, tamano_pagina)
     return Paginacion(total=total, pagina=pagina, tamano_pagina=tamano_pagina, items=page_items)
@@ -272,7 +258,7 @@ async def listar_capitulos_por_titulo(titulo_id: str, q: Optional[str] = Query(N
     description="Obtiene un Capítulo específico dentro de un Título.",
     responses={404: {"description": "Capítulo no encontrado"}},
 )
-async def obtener_capitulo_por_titulo(titulo_id: str, capitulo_num: int, user: Optional[HTTPBasicCredentials] = Depends(optional_auth)):
+async def obtener_capitulo_por_titulo(titulo_id: str, capitulo_num: int):
     m = get_mtime()
     idx = construir_indices(m)
     try:
@@ -292,7 +278,7 @@ async def obtener_capitulo_por_titulo(titulo_id: str, capitulo_num: int, user: O
     tags=["Capítulos"],
     description="Lista todos los capítulos con filtros opcionales por Título.",
 )
-async def listar_capitulos(q: Optional[str] = Query(None), titulo: Optional[str] = Query(None), ordenar_por: Optional[str] = Query("numero"), orden: str = Query("asc"), pagina: int = Query(1, ge=1), tamano_pagina: int = Query(20, ge=1, le=200), user: Optional[HTTPBasicCredentials] = Depends(optional_auth)):
+async def listar_capitulos(q: Optional[str] = Query(None), titulo: Optional[str] = Query(None), ordenar_por: Optional[str] = Query("numero"), orden: str = Query("asc"), pagina: int = Query(1, ge=1), tamano_pagina: int = Query(20, ge=1, le=200)):
     m = get_mtime()
     idx = construir_indices(m)
     lista = list(idx["capitulos"].values())
@@ -303,7 +289,7 @@ async def listar_capitulos(q: Optional[str] = Query(None), titulo: Optional[str]
             r = extraer_romano(f"TÍTULO {titulo}")
             tnum = r or 0
         lista = [c for c in lista if c.titulo_num == tnum]
-    lista = filtrar_buscar(lista, q, None, None, "capitulo")
+    lista = filtrar_buscar(lista, q, "capitulo")
     lista = ordenar(lista, ordenar_por, orden, "capitulo")
     page_items, total = paginar(lista, pagina, tamano_pagina)
     return Paginacion(total=total, pagina=pagina, tamano_pagina=tamano_pagina, items=page_items)
@@ -313,13 +299,13 @@ async def listar_capitulos(q: Optional[str] = Query(None), titulo: Optional[str]
     response_model=Paginacion,
     summary="Listar artículos",
     tags=["Artículos"],
-    description="Lista artículos con búsqueda textual, filtro por años, orden y paginación.",
+    description="Lista artículos con búsqueda textual, orden y paginación.",
 )
-async def listar_articulos(q: Optional[str] = Query(None), anio_desde: Optional[int] = Query(None), anio_hasta: Optional[int] = Query(None), ordenar_por: Optional[str] = Query("numero"), orden: str = Query("asc"), pagina: int = Query(1, ge=1), tamano_pagina: int = Query(20, ge=1, le=200), user: Optional[HTTPBasicCredentials] = Depends(optional_auth)):
+async def listar_articulos(q: Optional[str] = Query(None), ordenar_por: Optional[str] = Query("numero"), orden: str = Query("asc"), pagina: int = Query(1, ge=1), tamano_pagina: int = Query(20, ge=1, le=200)):
     m = get_mtime()
     idx = construir_indices(m)
     lista = list(idx["articulos"].values())
-    lista = filtrar_buscar(lista, q, anio_desde, anio_hasta, "articulo")
+    lista = filtrar_buscar(lista, q, "articulo")
     lista = ordenar(lista, ordenar_por, orden, "articulo")
     page_items, total = paginar(lista, pagina, tamano_pagina)
     return Paginacion(total=total, pagina=pagina, tamano_pagina=tamano_pagina, items=page_items)
@@ -332,7 +318,7 @@ async def listar_articulos(q: Optional[str] = Query(None), anio_desde: Optional[
     description="Obtiene el contenido y metadatos de un artículo por su número.",
     responses={404: {"description": "Artículo no encontrado"}},
 )
-async def obtener_articulo(numero: int, user: Optional[HTTPBasicCredentials] = Depends(optional_auth)):
+async def obtener_articulo(numero: int):
     m = get_mtime()
     idx = construir_indices(m)
     art = idx["articulos"].get(numero)

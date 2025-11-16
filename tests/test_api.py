@@ -51,11 +51,6 @@ def test_busqueda_texto():
     assert payload["total"] >= 1
     assert len(payload["items"]) <= 5
 
-def test_filtro_anio():
-    r = client.get("/articulos", params={"anio_desde": 1949, "anio_hasta": 1949})
-    assert r.status_code == 200
-    payload = r.json()
-    assert any(6 == a["numero"] for a in payload["items"]) or payload["total"] >= 0
 
 def test_ordenamiento():
     r = client.get("/articulos", params={"ordenar_por": "longitud", "orden": "desc"})

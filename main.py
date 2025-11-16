@@ -1,5 +1,4 @@
-from fastapi import FastAPI, Depends, Request
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import FastAPI, Request
 from typing import Optional
 import os
 
@@ -48,14 +47,6 @@ from routes.constitucion import router as constitucion_router
 
 app.include_router(constitucion_router)
 
-security = HTTPBasic(auto_error=False)
-
-
-def optional_auth(
-    credentials: Optional[HTTPBasicCredentials] = Depends(security),
-) -> Optional[HTTPBasicCredentials]:
-    return credentials
-
 
 @app.get(
     "/status",
@@ -63,9 +54,7 @@ def optional_auth(
     tags=["Sistema"],
     description="Verifica el estado del servicio y conectividad.",
 )
-async def status(
-    request: Request, user: Optional[HTTPBasicCredentials] = Depends(optional_auth)
-):
+async def status(request: Request):
     return {"status": "ok"}
 
 
