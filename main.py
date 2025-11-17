@@ -60,7 +60,7 @@ async def status(request: Request):
 
 @app.get("/", summary="Raíz", tags=["Sistema"], description="Ruta raíz del servicio.")
 async def root(request: Request):
-    return {"message": "Constitución de Panamá API"}
+    return {"message": "Constitución de Panamá API 🇵🇦"}
 
 
 if __name__ == "__main__":
